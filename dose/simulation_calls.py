@@ -27,32 +27,22 @@ from . import ragaraja, register_machine
 from .database_calls import connect_database, db_log_simulation_parameters
 from .database_calls import db_report
 
-def simulation_core(sim_functions, sim_parameters, Populations, World):
-    '''
-    Sequential ecological cell DOSE simulator.
-    
-    Performs the following operations:
-        - Creating simulation file directory for results text file, population 
-        freeze, and world burial storage
-        - Generate a simulation start time to identify the current simulation
-        - Define active Ragaraja instructions
-        - Connecting to logging database (if needed)
-        - Writing simulation parameters into results text file
-        - Initialize World and Population
-        - Deploy population(s) onto the world
-        - Run the simulation and recording the results
-        - Writing final results into results text file
-        - Close logging database (if used)
-        - Copy simulation script into simulation file directory
-    
+def file_preparation(sim_functions, sim_parameters, Populations, World):
+    """
+    Step 1 of Sequential ecological cell DOSE simulator - Creating simulation 
+    file directory for results text file, population freeze, and world burial 
+    storage
+
     @param sim_functions: implemented simulation functions (see 
     dose.dose_functions)
     @param sim_parameters: simulation parameters dictionary (see Examples)
     @param Populations: dictionary of population objects
     @param World: dose_world.World object
-    '''
+    """
     time_start = '-'.join([str(datetime.utcnow()).split(' ')[0],
                            str(time())])
+    # Step 2: Creating simulation file directory for results text 
+    # file, population freeze, and world burial storage
     print('Creating simulation file directories...')
     directory ='_'.join([sim_parameters["simulation_name"],time_start])
     directory = os.sep.join([os.getcwd(), 'Simulations', directory]) 
@@ -63,27 +53,68 @@ def simulation_core(sim_functions, sim_parameters, Populations, World):
     print('Adding starting time to simulation parameters...')
     sim_parameters["starting_time"] = time_start
     sim_functions = sim_functions()
-    if sim_parameters["ragaraja_version"] == 0:
+    return (sim_functions, sim_parameters, Populations, World)
+
+def ragaraja_activation(sim_functions, sim_parameters, Populations, World):
+    """
+    Step 2 of Sequential ecological cell DOSE simulator - Define active 
+    interpreter instructions.
+
+    @param sim_functions: implemented simulation functions (see 
+    dose.dose_functions)
+    @param sim_parameters: simulation parameters dictionary (see Examples)
+    @param Populations: dictionary of population objects
+    @param World: dose_world.World object
+    """
+    if sim_parameters["ragaraja_version"] == 0 or \
+        sim_parameters["ragaraja_version"] == 66:
         print('Activating ragaraja version: 0...')
         ragaraja.activate_version(sim_parameters["ragaraja_version"],
                                   sim_parameters["ragaraja_instructions"])
+    elif sim_parameters["ragaraja_version"] == 'user-defined':
+        pass
     else:
         print('Activating ragaraja version: ' + \
             str(sim_parameters["ragaraja_version"]) + '...')
         ragaraja.activate_version(sim_parameters["ragaraja_version"])
-    if "database_file" in sim_parameters and \
-        "database_logging_frequency" in sim_parameters: 
-        print('Connecting to database file: ' + \
-            sim_parameters["database_file"] + '...')
-        (con, cur) = connect_database(None, sim_parameters)
-        print('Logging simulation parameters to database file...')
-        (con, cur) = db_log_simulation_parameters(con, cur, sim_parameters)
+    return (sim_functions, sim_parameters, Populations, World)
+
+def connect_logging_database(sim_functions, sim_parameters, Populations, World):
+    """
+    Step 3 of Sequential ecological cell DOSE simulator - Connecting to 
+    logging database.
+
+    @param sim_functions: implemented simulation functions (see 
+    dose.dose_functions)
+    @param sim_parameters: simulation parameters dictionary (see Examples)
+    @param Populations: dictionary of population objects
+    @param World: dose_world.World object
+    """
+    print('Connecting to database file: ' + \
+        sim_parameters["database_file"] + '...')
+    (con, cur) = connect_database(None, sim_parameters)
+    print('Logging simulation parameters to database file...')
+    (con, cur) = db_log_simulation_parameters(con, cur, sim_parameters)
+    return (sim_functions, sim_parameters, Populations, World, 
+            con, cur)
+
+def deploy_populations(sim_functions, sim_parameters, Populations, World):
+    """
+    Step 4 of Sequential ecological cell DOSE simulator - Deploy 
+    population(s) onto the world.
+
+    @param sim_functions: implemented simulation functions (see 
+    dose.dose_functions)
+    @param sim_parameters: simulation parameters dictionary (see Examples)
+    @param Populations: dictionary of population objects
+    @param World: dose_world.World object
+    """
     for pop_name in Populations:
         print('\nPreparing population: ' + pop_name + ' for simulation...')
         if 'sim_folder' in sim_parameters or \
             'database_source' in sim_parameters:
             print('Calculating final generation count...')
-            max = sim_parameters["rev_start"] \
+            maximum_generations = sim_parameters["rev_start"] \
                 [sim_parameters["population_names"].index(pop_name)] + \
                 sim_parameters["extend_gen"]
             print('Updating generation count from previous simulation...')
@@ -106,60 +137,159 @@ def simulation_core(sim_functions, sim_parameters, Populations, World):
                 print('Executing deployment code 4: Centralized eco-cell deployment...')
                 deploy_4(sim_parameters, Populations, pop_name, World)
             print('Adding maximum generations to simulation parameters...')
-            max = sim_parameters["maximum_generations"]
+            maximum_generations = sim_parameters["maximum_generations"]
             generation_count = 0
+        # Writing simulation parameters into results text file
         print('Writing simulation parameters into txt file report...')
         write_parameters(sim_parameters, pop_name)
         print('Updating generation count...')
         Populations[pop_name].generation = generation_count
-    print('\nSimulation preparation complete...')
-    while generation_count < max:
-        generation_count = generation_count + 1
-        sim_functions.ecoregulate(World)
-        eco_cell_iterator(World, sim_parameters,
-                          sim_functions.update_ecology)
-        eco_cell_iterator(World, sim_parameters,
-                          sim_functions.update_local)
-        eco_cell_iterator(World, sim_parameters, sim_functions.report)
-        bury_world(sim_parameters, World, generation_count)
-        for pop_name in Populations:
-            if sim_parameters["interpret_chromosome"]:
-                interpret_chromosome(sim_parameters, Populations, 
-                                     pop_name, World)
-            report_generation(sim_parameters, Populations, pop_name, 
-                              sim_functions, generation_count)
-            sim_functions.organism_movement(Populations, pop_name, World)
-            sim_functions.organism_location(Populations, pop_name, World)
-        if "database_file" in sim_parameters and \
-            "database_logging_frequency" in sim_parameters and \
-            generation_count % \
-            int(sim_parameters["database_logging_frequency"]) == 0: 
-                (con, cur) = db_report(con, cur, sim_functions,
-                                   sim_parameters["starting_time"],
-                                   Populations, World, generation_count)
-        print('Generation ' + str(generation_count) + ' complete...')
+        print('\nSimulation preparation complete...')
+    return (sim_functions, sim_parameters, Populations, World, 
+            generation_count, maximum_generations)
+
+def simulate_one_cycle(sim_functions, sim_parameters, Populations, World, 
+                       generation_count):
+    """
+    Step 5a of Sequential ecological cell DOSE simulator - Run one 
+    simulation cycle.
+
+    @param sim_functions: implemented simulation functions (see 
+    dose.dose_functions)
+    @param sim_parameters: simulation parameters dictionary (see Examples)
+    @param Populations: dictionary of population objects
+    @param World: dose_world.World object
+    """
+    sim_functions.ecoregulate(World)
+    eco_cell_iterator(World, sim_parameters,
+                      sim_functions.update_ecology)
+    eco_cell_iterator(World, sim_parameters,
+                      sim_functions.update_local)
+    eco_cell_iterator(World, sim_parameters, sim_functions.report)
+    bury_world(sim_parameters, World, generation_count)
+    for pop_name in Populations:
+        if sim_parameters["interpret_chromosome"]:
+            interpret_chromosome(sim_parameters, Populations, 
+                                 pop_name, World)
+        report_generation(sim_parameters, Populations, pop_name, 
+                          sim_functions, generation_count)
+        sim_functions.organism_movement(Populations, pop_name, World)
+        sim_functions.organism_location(Populations, pop_name, World)
+    return (sim_functions, sim_parameters, Populations, World)
+
+def database_logging(sim_functions, sim_parameters, Populations, World, 
+                     con, cur, generation_count):
+    """
+    Step 5b of Sequential ecological cell DOSE simulator - Record the 
+    results from one simulation cycle.
+
+    @param sim_functions: implemented simulation functions (see 
+    dose.dose_functions)
+    @param sim_parameters: simulation parameters dictionary (see Examples)
+    @param Populations: dictionary of population objects
+    @param World: dose_world.World object
+    """
+    if "database_file" in sim_parameters and \
+        "database_logging_frequency" in sim_parameters and \
+        generation_count % \
+        int(sim_parameters["database_logging_frequency"]) == 0: 
+            (con, cur) = db_report(con, cur, sim_functions,
+                               sim_parameters["starting_time"],
+                               Populations, World, generation_count)
+    return (sim_functions, sim_parameters, Populations, World, 
+            con, cur)
+
+def close_logging_database(sim_functions, sim_parameters, Populations, World, 
+                           con, cur):
+    """
+    Step 6 of Sequential ecological cell DOSE simulator - Close logging 
+    database.
+
+    @param sim_functions: implemented simulation functions (see 
+    dose.dose_functions)
+    @param sim_parameters: simulation parameters dictionary (see Examples)
+    @param Populations: dictionary of population objects
+    @param World: dose_world.World object
+    """
     print('\nClosing simulation results...')
     for pop_name in Populations: close_results(sim_parameters, pop_name)
-    if "database_file" in sim_parameters and \
-        "database_logging_frequency" in sim_parameters:
-        print('Committing logged data into database file...') 
-        con.commit()
-        print('Terminating database connection...') 
-        con.close()
-    print('Copying simulation file script to simulation results directory...')
+    print('Committing logged data into database file...') 
+    con.commit()
+    print('Terminating database connection...') 
+    con.close()
+    return (sim_functions, sim_parameters, Populations, World)
 
-    #DV on my system, the inspect.stack()[2][1] value returns the full
-    #   path to the file ('/home/douwe/scr/.../scriptname.py'). 
-    #   The end result is an error for the original code, below, as the 
-    #   copyfile command is pointed to a wrong location: the directory
-    #   is added twice. This might be Py3, or Windows functionality.
-    #   With using the os.path module, this should give an OS-independent
-    #   way of extracting the basename and linking to the directory.
+def save_script(sim_functions, sim_parameters, Populations, World):
+    """
+    Step 7 of Sequential ecological cell DOSE simulator - Copy simulation 
+    script into simulation file directory.
+
+    @param sim_functions: implemented simulation functions (see 
+    dose.dose_functions)
+    @param sim_parameters: simulation parameters dictionary (see Examples)
+    @param Populations: dictionary of population objects
+    @param World: dose_world.World object
+    """
+    print('Copying simulation file script to simulation results directory...')
     sim_script_basename = os.path.basename(inspect.stack()[2][1])
     copyfile(inspect.stack()[2][1], 
-#DV_original#             sim_parameters['directory'] + inspect.stack()[2][1])
-             os.path.join(sim_parameters['directory'], sim_script_basename))
-    print('\nSimulation ended...')
+             os.path.join(sim_parameters['directory'], 
+             sim_script_basename))
+    return (sim_functions, sim_parameters, Populations, World)
+
+def sequential_simulator(sim_functions, sim_parameters, Populations, World):
+    '''
+    Sequential ecological cell DOSE simulator.
+    
+    Performs the following operations:
+        1. Creating simulation file directory for results text file, population 
+        freeze, and world burial storage
+        2. Define active interpreter instructions
+        3. Connecting to logging database
+        4. Deploy population(s) onto the world
+        5. Run the simulation and recording the results
+        6. Close logging database
+        7. Copy simulation script into simulation file directory
+    
+    @param sim_functions: implemented simulation functions (see 
+    dose.dose_functions)
+    @param sim_parameters: simulation parameters dictionary (see Examples)
+    @param Populations: dictionary of population objects
+    @param World: dose_world.World object
+    '''
+    # Step 1: Creating simulation file directory for results text file, population 
+    # freeze, and world burial storage
+    (sim_functions, sim_parameters, Populations, World) = \
+        file_preparation(sim_functions, sim_parameters, Populations, World)
+    # Step 2: Define active Ragaraja instructions
+    (sim_functions, sim_parameters, Populations, World) = \
+        ragaraja_activation(sim_functions, sim_parameters, Populations, World)
+    # Step 3: Connecting to logging database (if needed)
+    (sim_functions, sim_parameters, Populations, World, con, cur) = \
+        connect_logging_database(sim_functions, sim_parameters, Populations, World)
+    # Step 4: Initialize World and Population, then deploy 
+    # population(s) onto the world
+    (sim_functions, sim_parameters, Populations, World, generation_count, maximum_generations) = \
+        deploy_populations(sim_functions, sim_parameters, Populations, World)
+    # Step 5: Run the simulation and recording the results
+    while generation_count < maximum_generations:
+        generation_count = generation_count + 1
+        (sim_functions, sim_parameters, Populations, World) = \
+            simulate_one_cycle(sim_functions, sim_parameters, Populations, World,
+                               generation_count)
+        (sim_functions, sim_parameters, Populations, World, con, cur) = \
+            database_logging(sim_functions, sim_parameters, Populations, World, 
+                             con, cur, generation_count)
+        print('Generation ' + str(generation_count) + ' complete...')
+    # Step 6: Close logging database (if used)
+    (sim_functions, sim_parameters, Populations, World) = \
+        close_logging_database(sim_functions, sim_parameters, Populations, World, 
+                           con, cur)
+    # Step 7: Copy simulation script into simulation file directory
+    (sim_functions, sim_parameters, Populations, World) = \
+        save_script(sim_functions, sim_parameters, Populations, World)
+    return (sim_functions, sim_parameters, Populations, World)
+    
 
 def coordinates(location):
     '''
@@ -415,13 +545,34 @@ def interpret_chromosome(sim_parameters, Populations, pop_name, World):
             if array == None: 
                 array = [0] * sim_parameters["max_tape_length"]
         for chromosome_count in range(len(individual.genome)):
+            # get world environment conditions
             inputdata = World.ecosystem[x][y][z]['local_input']
             output = World.ecosystem[x][y][z]['local_output']
+            # get chromosomal sequence
             source = ''.join(individual.genome[chromosome_count].sequence)
+            # process chromosome sequence if needed
+            if sim_parameters["ragaraja_version"] == 0.2:
+                source = ragaraja.nBF_to_Ragaraja(source)
+            elif sim_parameters["ragaraja_version"] == 66:
+                source = sim_parameters["base_converter"](source) 
+            # print(source)
+            # change interpreter if needed
+            if sim_parameters["ragaraja_version"] == 'user-defined':
+                interpreter = sim_parameters["interpreter"]
+                instruction_size = sim_parameters["instruction_size"]
+            elif sim_parameters["interpreter"] == 'ragaraja':
+                interpreter = ragaraja.ragaraja
+                instruction_size = 3
+            else:
+                interpreter = ragaraja.ragaraja
+                instruction_size = 3
+            # get cytoplasm / blood
             array = Populations[pop_name].agents[i].status['blood']
+            # interpret chromosme
             try: (array, apointer, inputdata, output, source, spointer) = \
-                register_machine.interpret(source, ragaraja.ragaraja, 3,
-                                           inputdata, array,
+                register_machine.interpret(source, interpreter, 
+                                           instruction_size,
+                                           inputdata, array, 
                                            sim_parameters["max_tape_length"],
                                            sim_parameters["max_codon"])
             except Exception as e: 
@@ -430,6 +581,7 @@ def interpret_chromosome(sim_parameters, Populations, pop_name, World):
                 Populations[pop_name].agents[i]. \
                     status['chromosome_error'] = error_msg
                 Populations[pop_name].agents[i].status['blood'] = array
+            # update world environment conditions and cytoplasm / blood
             Populations[pop_name].agents[i].status['blood'] = array
             World.ecosystem[x][y][z]['temporary_input'] = inputdata
             World.ecosystem[x][y][z]['temporary_output'] = output
@@ -478,6 +630,9 @@ def report_generation(sim_parameters, Populations, pop_name,
     @param generation_count: current generation count for reporting
     @return: none
     '''
+    for index in range(len(Populations[pop_name].agents)):
+        Populations[pop_name].agents[index].status['generation'] = \
+        generation_count
     report = step(Populations, pop_name, sim_functions)
     if generation_count % int(sim_parameters["fossilized_frequency"]) == 0:
         file = '%s%s_%s_' % (sim_parameters["directory"],

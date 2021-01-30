@@ -31,14 +31,19 @@ The interpreter environment consists of the following elements:
     initialization.
     4. Output List: A list of output from the execution. This may also be 
     used as a secondary tape. 
+    5. Set of 99 registers: Can be used as temporary storage for writing 
+    to and reading cell values from the tape.
 
-When the program terminates, all 4 elements are returned, and the 
-interpreter terminates itself. 
+When the program terminates, 4 elements (Array, Source, Input List and 
+Output List) are returned, and the interpreter terminates itself. 
 
 @see: http://esolangs.org/wiki/Ragaraja
 '''
 import random
 import math
+
+from . import copads
+from . import lc_bf
 from .copads.samplestatistics import SingleSample
 from .lc_bf import increment, decrement
 from .lc_bf import forward, backward
@@ -409,11 +414,45 @@ def source_move(array, apointer, inputdata, output, source, spointer):
         spointer = spointer + (3 * abs(int(array[apointer])))
     return (array, apointer, inputdata, output, source, spointer)
     
+def source_manipulate(array, apointer, inputdata, output, source, spointer):
+    '''!
+    Manipulating the source.
+
+    Instructions handled:
+        - 029: Replace current source instruction with modulus current 
+        tape cell value by 1000.
+        - 030: Invert the next source instruction if it is not the end 
+        of the source.
+        - 049: Randomly replace the current instruction with any of 
+        the 1000 instructions.
+    '''
+    cmd = source[spointer:spointer+3]
+    if cmd == '029':
+        value = instruction_padding((array[apointer]) % 1000)
+        value = list(value)
+        source[spointer] = str(value[0])
+        source[spointer+1] = str(value[1])
+        source[spointer+2] = str(value[2])
+    if cmd == '030' and (spointer + 6) < len(source):
+        instruction = list(source[spointer+3:spointer+6])
+        source[spointer+3] = str(10 - source[spointer+3])
+        source[spointer+4] = str(10 - source[spointer+4])
+        source[spointer+5] = str(10 - source[spointer+5])
+    if cmd == '049':
+        instruction = instruction_padding(random.randint(0, 1001))
+        instruction = list(instruction)
+        source[spointer] = instruction[0]
+        source[spointer+1] = instruction[1]
+        source[spointer+2] = instruction[2]
+    return (array, apointer, inputdata, output, source, spointer)
+
 def set_tape_value(array, apointer, inputdata, output, source, spointer):
     '''
     Set values into tape cell by over-writing the original value.
     
     Instructions handled:
+        - 031: Set current tape cell value to modulus current tape cell 
+        value by 1000.
         - 084: Set current tape cell to "0".
         - 085: Set current tape cell to "-1".
         - 086: Set current tape cell to "1". 
@@ -439,6 +478,7 @@ def set_tape_value(array, apointer, inputdata, output, source, spointer):
         to the tape position of current cell. 
     '''
     cmd = source[spointer:spointer+3]
+    if cmd == '031': array[apointer] = float(array[apointer]) % 1000
     if cmd == '084': array[apointer] = 0
     if cmd == '085': array[apointer] = -1
     if cmd == '086': array[apointer] = 1
@@ -954,7 +994,7 @@ def tape_manipulate(array, apointer, inputdata, output, source, spointer):
     
     Instructions handled:
         - 081: Swap the value of the current cell (n) and (n+1)th cell. 
-        - 133: Flip the tape from the cell after the current cell to the 
+        - 131: Flip the tape from the cell after the current cell to the 
         end of the tape (temporarily breaking the circularity of the tape).
         - 161: Cut the tape before the current cell (n) and append it to 
         the end of the tape and set tape pointer to 0. 
@@ -979,7 +1019,7 @@ def tape_manipulate(array, apointer, inputdata, output, source, spointer):
             temp = array[apointer]
             array[apointer] = array[0]
             array[0] = temp
-    if cmd == '133' and (apointer + 1) < len(array):
+    if cmd == '131' and (apointer + 1) < len(array):
         temp = array[apointer+1:]
         array = array[0:apointer+1]
         temp.reverse()
@@ -1642,8 +1682,8 @@ ragaraja = {'000': forward, '001': tape_move,
             '022': output_IO, '023': source_move,
             '024': source_move, '025': source_move,
             '026': source_move, '027': source_move,
-            '028': source_move, '029': not_used,
-            '030': not_used, '031': not_used,
+            '028': source_move, '029': source_manipulate,
+            '030': source_manipulate, '031': set_tape_value,
             '032': accumulations, '033': accumulations,
             '034': tape_size, '035': tape_size,
             '036': tape_size, '037': output_IO,
@@ -1652,7 +1692,7 @@ ragaraja = {'000': forward, '001': tape_move,
             '042': output_IO, '043': tape_move,
             '044': tape_move, '045': tape_move,
             '046': flipping, '047': flipping,
-            '048': flipping, '049': not_used,
+            '048': flipping, '049': source_manipulate,
             '050': nBF_random_op, '051': nBF_random_op,
             '052': nBF_random_op, '053': nBF_random_op,
             '054': nBF_random_op, '055': nBF_random_op,
@@ -1693,8 +1733,8 @@ ragaraja = {'000': forward, '001': tape_move,
             '124': logic, '125': logic,
             '126': logic, '127': logic,
             '128': logic, '129': logic,
-            '130': logic, '131': not_used,
-            '132': not_used, '133': tape_manipulate,
+            '130': logic, '131': tape_manipulate,
+            '132': not_used, '133': not_used,
             '134': not_used, '135': not_used,
             '136': not_used, '137': not_used,
             '138': not_used, '139': not_used,
@@ -1725,7 +1765,7 @@ ragaraja = {'000': forward, '001': tape_move,
             '188': set_tape_value, '189': set_tape_value,
             '190': set_tape_value, '191': set_tape_value,
             '192': set_tape_value, '193': set_tape_value,
-            '194': set_tape_value, '195': not_used,
+            '194': set_tape_value, '195': set_tape_value,
             '196': mathematics, '197': mathematics,
             '198': mathematics, '199': not_used,
             '200': jump_identifier, '201': register_IO,
@@ -2277,34 +2317,39 @@ def nBF_to_Ragaraja(source):
     '''
     converted = []
     for x in source:
-        if x == 'G': converted.append('000')
-        elif x == 'C': converted.append('004')
-        elif x == 'A': converted.append('008')
-        elif x == 'T': converted.append('011')
-        elif x == '.': converted.append('020')
-        elif x == 'R': converted.append('050')
-        elif x == 'Y': converted.append('051')
-        elif x == 'S': converted.append('052')
-        elif x == 'W': converted.append('053')
-        elif x == 'K': converted.append('054')
-        elif x == 'M': converted.append('055')
-        elif x == 'B': converted.append('056')
-        elif x == 'D': converted.append('057')
-        elif x == 'H': converted.append('058')
-        elif x == 'V': converted.append('059')
-        elif x == 'N': converted.append('060')
-        else: converted.append('...')
+        if x.upper() == 'G': converted.append('000')
+        elif x.upper()  == 'C': converted.append('004')
+        elif x.upper()  == 'A': converted.append('008')
+        elif x.upper()  == 'T': converted.append('011')
+        elif x.upper()  == '.': converted.append('020')
+        elif x.upper()  == 'R': converted.append('050')
+        elif x.upper()  == 'Y': converted.append('051')
+        elif x.upper()  == 'S': converted.append('052')
+        elif x.upper()  == 'W': converted.append('053')
+        elif x.upper()  == 'K': converted.append('054')
+        elif x.upper()  == 'M': converted.append('055')
+        elif x.upper()  == 'B': converted.append('056')
+        elif x.upper()  == 'D': converted.append('057')
+        elif x.upper()  == 'H': converted.append('058')
+        elif x.upper()  == 'V': converted.append('059')
+        elif x.upper()  == 'N': converted.append('060')
+        else: converted.append('200') # Jump identifier I
     return ''.join(converted)
 
 def activate_version(version=1, instructions=None):
     '''
     Function to set instructions for usage, based on version numbers. 
     Allowable versions are: 
-        - 0.1: Using NucleotideBF instructions.
-        - 0: User-defined set of instructions to be used.
-        - 1: As defined in Ling, MHT. 2012. An Artificial Life Simulation 
-        Library Based on Genetic Algorithm, 3-Character Genetic Code and 
-        Biological Hierarchy. The Python Papers 7: 5.
+        - 0.1: Using NucleotideBF instructions as 3-digit code.
+        - 0.2: Using NucleotideBF instructions as IUPAC nucleotide code.
+        - 0: User-defined set of instructions to be used, where genome 
+        comprises of Ragaraja instructions.
+        - 1: Ragaraja instruction set verion 1.
+        - 2: Ragaraja instruction set verion 2.
+        - 66: User-defined set of instructions to be used, where genome 
+        comprises of user-defined bases which have to be converted to 
+        Ragaraja instructions.
+        - 98: All currently implemented instructions.
         - 99: All currently tested instructions.
     
     Instruction set for B{version 0.1} is ['000', '004', '008', '011', 
@@ -2347,6 +2392,19 @@ def activate_version(version=1, instructions=None):
     '378', '379', '380', '381', '382', '383', '384', '385', '386', '387', 
     '388', '389', '390', '391', '392', '393', '394', '395', '396', '397', 
     '398', '399']
+
+    Instruction set for B{version 2} is the following, on top of 
+    B{version 1}, ['400', '500', '501', '502', '503', '504', '505', 
+    '506', '507', '508', '509', '510', '511', '512', '513', '514', '515', 
+    '516', '517', '518', '519', '520', '521', '522', '523', '524', '525', 
+    '526', '527', '528', '529', '530', '531', '532', '533', '534', '535', 
+    '536', '537', '538', '539', '540', '541', '542', '543', '544', '545', 
+    '546', '547', '548', '549', '550', '551', '552', '553', '554', '555', 
+    '556', '557', '558', '559', '560', '561', '562', '563', '564', '565', 
+    '566', '567', '568', '569', '570', '571', '572', '573', '574', '575', 
+    '576', '577', '578', '579', '580', '581', '582', '583', '584', '585', 
+    '586', '587', '588', '589', '590', '591', '592', '593', '594', '595', 
+    '596', '597', '598', '599', '600']
         
     @param version: Define the version to activate. Default = 1. 
     @param instructions: User-defined set of instructions (as list of 
@@ -2355,11 +2413,25 @@ def activate_version(version=1, instructions=None):
     
     @since: version 0.4
     '''
-    if version == 0.1: instructions = nBF_instructions
-    if version == 1: instructions = ragaraja_v1
-    if version == 2: instructions = ragaraja_v2
-    if version == 99: instructions = tested_ragaraja_instructions
-    for key in list(ragaraja.keys()):
-        if key not in instructions:
-            ragaraja[key] = not_used
-    return instructions
+    if version == 0 or version == 66: 
+        for key in list(ragaraja.keys()):
+            if key not in instructions:
+                ragaraja[key] = not_used
+    elif version == 0.1 or version == 0.2: 
+        for key in list(ragaraja.keys()):
+            if key not in nBF_instructions:
+                ragaraja[key] = not_used
+    elif version == 1: 
+        for key in list(ragaraja.keys()):
+            if key not in ragaraja_v1:
+                ragaraja[key] = not_used
+    elif version == 2: 
+        for key in list(ragaraja.keys()):
+            if key not in ragaraja_v2:
+                ragaraja[key] = not_used
+    elif version == 98:
+        pass
+    elif version == 99:
+        for key in list(ragaraja.keys()):
+            if key not in tested_ragaraja_instructions:
+                ragaraja[key] = not_used
